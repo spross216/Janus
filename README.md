@@ -1,12 +1,4 @@
-```
-   ╔════════════════════════════════════════════════╗
-   ║                                                ║
-   ║   IT  ←══════ ••  J A N U S  •• ══════→  OT    ║
-   ║                                                ║
-   ║             Zero Trust OT Gateway              ║
-   ║                                                ║
-   ╚════════════════════════════════════════════════╝
-```
+![Janus — Zero Trust OT Gateway](banner.png)
 
 # Janus — Zero Trust OT Gateway
 
