@@ -2,11 +2,10 @@
 
 # Janus — Zero Trust OT Gateway
 
-Identity-based admission control for accessing Operational Technology (OT) devices —
+A stateless admission control service for accessing Operational Technology (OT) devices —
 CNC machines, welding robots, SCADA HMIs — from the IT side of a manufacturing network.
 
-The gateway answers exactly one question, every time someone wants to talk to an OT
-device:
+## Core Question
 
 > *Is this user, on this device, allowed to reach that machine right now?*
 
@@ -29,6 +28,9 @@ admit or deny — is written to an append-only audit log.**
 Microsoft Graph, runs them through a fixed sequence of gates, and emits a single
 decision: ADMIT (with a session ID and expiry) or DENY (with a reason). Every
 decision lands in an append-only audit log.
+
+In practice: a client asks Janus "can this user access this device?", Janus returns
+a decision, and a transport layer enforces it.
 
 **Janus is not:**
 
@@ -70,9 +72,7 @@ The gap Janus fills:
   care whether the tunnel is TCP, IP, or application-layer; it emits a session
   ID that a transport plug-in keys off.
 
-This is a small, opinionated piece of infrastructure that belongs in the gap
-between "we already have firewalls" and "we can afford an enterprise ZTNA
-license."
+**This is not a missing feature — it is a missing architecture.**
 
 ---
 
@@ -146,6 +146,49 @@ horizontally and fail without losing context.
 Every path through the function — including all three deny branches — writes exactly one
 audit entry before returning. There is no way to reach the tunnel-open step without an
 admit entry already on disk.
+
+---
+
+## Deployment patterns
+
+Janus doesn't care what the requesting client physically is. It needs the
+request to come from an **Entra-joined, Intune-managed Windows session** — that
+session is what Gate 3 (Intune compliance) actually evaluates, not the user's
+local hardware. The user's physical device can be a locked-down thin client, a
+corporate laptop, or even a BYOD machine that does nothing but render a remote
+session. The MFA story (TPM-backed Windows Hello for Business) applies at
+whatever the user signs into first — thin-client OS, AVD client, or a local
+workstation — and the Janus admission flow is identical in every case.
+
+Pick the deployment pattern based on the shape of the shop:
+
+**On-prem RDS / terminal server.** One Windows Server (or a clustered pair)
+hosts the OT vendor software (Studio 5000, TIA Portal, FactoryTalk, vendor HMI
+clients, CAM tools); technicians connect from cheap thin clients on the floor
+via RemoteApp or full RDS sessions. Cheapest option for a small shop, works
+during WAN outages, centralizes OT-software patching to one image. Trade: one
+more on-prem box to own.
+
+**Azure Virtual Desktop.** Same pattern, but the session hosts live in Azure.
+Cleaner identity story (native Entra ID), no on-prem server to maintain, easier
+multi-site rollout. Trades: a WAN outage stops the shop floor; back-haul to OT
+devices needs a site-to-site VPN or ExpressRoute; and some OT vendors don't
+certify their software on multi-session AVD, which can force you onto
+single-session Windows 365 / dedicated AVD hosts and erode the cost advantage.
+
+**Dedicated workstations.** A real Windows PC per technician, Entra-joined and
+Intune-managed. Simplest model, no remoting layer to operate. Trades: no
+centralized image (you patch every workstation), and per-seat OT-software
+licensing tends to be expensive.
+
+**AVD on Azure Stack HCI.** AVD's centralized image management on on-prem
+hardware. Useful if you want the operational benefits of AVD without the WAN
+dependency, but the infrastructure and licensing complexity is rarely worth it
+below ~50 seats.
+
+For a typical 10–30-person machine shop on a single site, **on-prem RDS** is
+usually the right answer: cheap, offline-capable, and Gate 3 evaluates one
+well-managed session host instead of a fleet of shop-floor laptops.
 
 ---
 
@@ -248,6 +291,8 @@ Tests are pure-function only — they run offline and require no Graph tenant.
 ---
 
 ## Building an MVP
+
+The goal of the MVP is to reproduce the PoC's behavior as a network service.
 
 A minimum viable Janus port is:
 
@@ -376,6 +421,14 @@ imperative-shell split that the PowerShell version already has — it is the sin
 important piece of design to carry forward, because it is what makes the admission logic
 testable without a Graph tenant and what makes the audit trail trivial to reason about
 during an assessment.
+
+---
+
+## Where to start
+
+A good first step is implementing the HTTP API and porting the functional core
+into your target language. The Pester tests define the expected behavior and
+serve as the conformance suite.
 
 ---
 
