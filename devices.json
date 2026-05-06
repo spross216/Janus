@@ -1,0 +1,34 @@
+[
+  {
+    "deviceId": "ot-cnc-01",
+    "displayName": "CNC Machine #1 — Bay A",
+    "requiredGroup": "OT-CNC-Operators",
+    "location": "Manufacturing Bay A",
+    "protocol": "Modbus TCP",
+    "ipAddress": "192.168.100.10"
+  },
+  {
+    "deviceId": "ot-cnc-02",
+    "displayName": "CNC Machine #2 — Bay A",
+    "requiredGroup": "OT-CNC-Operators",
+    "location": "Manufacturing Bay A",
+    "protocol": "Modbus TCP",
+    "ipAddress": "192.168.100.11"
+  },
+  {
+    "deviceId": "ot-weld-01",
+    "displayName": "Welding Robot #1 — Bay B",
+    "requiredGroup": "OT-Welding-Operators",
+    "location": "Manufacturing Bay B",
+    "protocol": "EtherNet/IP",
+    "ipAddress": "192.168.100.20"
+  },
+  {
+    "deviceId": "ot-scada-01",
+    "displayName": "SCADA HMI — Control Room",
+    "requiredGroup": "OT-SCADA-Admins",
+    "location": "Control Room",
+    "protocol": "OPC-UA",
+    "ipAddress": "192.168.100.30"
+  }
+]
