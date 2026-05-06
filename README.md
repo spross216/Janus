@@ -192,6 +192,34 @@ well-managed session host instead of a fleet of shop-floor laptops.
 
 ---
 
+## Companion PowerShell module (planned)
+
+Alongside the gateway, this project will ship a companion **PowerShell
+management module** for deploying and operating Janus. The gateway itself has
+no PowerShell dependency at runtime — the module is a separate artifact that
+serves as the day-one operator surface for shops already living in PowerShell.
+
+Planned capabilities:
+
+- **Deployment** — pull and install the Janus container image, render
+  configuration, lay down service definitions (systemd or Windows service),
+  and verify the deployment is healthy.
+- **State queries** — wrap the gateway's state endpoints in idiomatic cmdlets
+  (`Get-JanusSession`, `Get-JanusDevice`, `Get-JanusDecision`,
+  `Get-JanusHealth`).
+- **Audit reporting** — filter the audit log by user, device, decision, or
+  time window and render the assessor-ready compliance reports CMMC needs.
+- **Device registry management** — add, remove, update, and bulk-import OT
+  device entries with schema validation against `devices.json`.
+- **Diagnostics** — health checks, Graph connectivity tests, per-UPN
+  compliance-state spot checks.
+
+The module is a planned deliverable, not yet implemented. When it ships, it
+will live in a sibling repository and install from the PowerShell Gallery
+(`Install-Module Janus`).
+
+---
+
 ## What the PoC pins down
 
 OT networks have historically been protected by air gaps and network segmentation alone.
@@ -309,6 +337,11 @@ A minimum viable Janus port is:
   fine for v0; database or CMDB integration is v1.
 - [ ] **Audit logging.** Append-only sink writing the canonical entry shape.
   Local file is fine for v0; SIEM forwarding is v1.
+- [ ] **PowerShell-consumable state artifacts.** Beyond the append-only audit
+  log, emit live system state in a form a PowerShell operator can query at any
+  time with `Invoke-RestMethod` or `ConvertFrom-Json` — active sessions,
+  registered devices, decision counts, configuration snapshot. The audit log
+  answers "what happened"; these artifacts answer "what is true right now."
 - [ ] **Session tracking.** Issue session IDs, store them with their expiry,
   expose `GET /session/{id}` for lookup and `DELETE /session/{id}` for early
   revocation.
