@@ -214,6 +214,15 @@ Planned capabilities:
 - **Diagnostics** — health checks, Graph connectivity tests, per-UPN
   compliance-state spot checks.
 
+**Looking further ahead**, the module is also intended to grow into a
+multi-deployment management surface for **MSPs serving multiple machine shops**
+— operating many on-prem Janus deployments from one operator console, with
+audit-log aggregation, fleet-wide registry sync, and per-tenant scoping. This
+direction is **post-MVP** and will be informed by what the first production
+deployments need; the likely shape is Azure Arc + Lighthouse for
+Microsoft-shop MSPs, or a custom RMM-style control plane for those who want to
+keep customers off Azure.
+
 The module is a planned deliverable, not yet implemented. When it ships, it
 will live in a sibling repository and install from the PowerShell Gallery
 (`Install-Module Janus`).
@@ -336,12 +345,18 @@ A minimum viable Janus port is:
 - [ ] **Device registry.** Persistent backing store. The PoC's flat JSON file is
   fine for v0; database or CMDB integration is v1.
 - [ ] **Audit logging.** Append-only sink writing the canonical entry shape.
-  Local file is fine for v0; SIEM forwarding is v1.
+  **Implement as a swappable sink interface, not a hardcoded local-file write**
+  — local file is fine for v0; SIEM forwarding is v1; remote push to an MSP
+  control plane is post-MVP. All three should slot into the same interface
+  without engine changes.
 - [ ] **PowerShell-consumable state artifacts.** Beyond the append-only audit
   log, emit live system state in a form a PowerShell operator can query at any
   time with `Invoke-RestMethod` or `ConvertFrom-Json` — active sessions,
   registered devices, decision counts, configuration snapshot. The audit log
   answers "what happened"; these artifacts answer "what is true right now."
+  **Make the endpoints suitable for remote consumption** (HTTPS, auth-aware,
+  not localhost-only) so the same surface can serve the local PowerShell
+  module today and a remote operator console later.
 - [ ] **Session tracking.** Issue session IDs, store them with their expiry,
   expose `GET /session/{id}` for lookup and `DELETE /session/{id}` for early
   revocation.

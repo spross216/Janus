@@ -23,7 +23,7 @@ out before any code changes hands.
 The most valuable contributions, roughly in order:
 
 1. **A port of the admission engine to C# (ASP.NET Core) or F#.** See the
-   "Production target language" section of the README for the rationale. Keep
+   "Implementation direction" section of the README for the rationale. Keep
    the functional-core / imperative-shell split that the PowerShell version has.
 2. **A real transport layer.** The PoC stops at issuing a session ID; the
    `TODO for SWE` comment in `Request-OtAccess.ps1` marks where the tunnel
@@ -35,6 +35,12 @@ The most valuable contributions, roughly in order:
    this log.
 5. **More tests.** The PowerShell core has Pester coverage; the production port
    should match or exceed it.
+6. **The companion PowerShell management module.** A `Janus` PowerShell module
+   that wraps the gateway's state endpoints, audit-log filtering, device-registry
+   management, and deployment helpers — see the "Companion PowerShell module"
+   section in the README. The maintainer plans to lead this in a sibling
+   repository; testable cmdlet coverage and Pester tests there are especially
+   welcome contributions once that repo is up.
 
 If you have an idea that does not fit one of these, open an issue first to
 discuss scope before doing the work.
