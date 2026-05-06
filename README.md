@@ -22,11 +22,72 @@ admit or deny — is written to an append-only audit log.**
 
 ---
 
+## What Janus is — and what it isn't
+
+**Janus is a stateless admission decision service.** Given a request of the form
+`(upn, deviceId)`, it consumes live identity, group, and compliance signals from
+Microsoft Graph, runs them through a fixed sequence of gates, and emits a single
+decision: ADMIT (with a session ID and expiry) or DENY (with a reason). Every
+decision lands in an append-only audit log.
+
+**Janus is not:**
+
+- **A network tunnel.** The decision engine emits a session ID; the actual
+  transport (TCP proxy, WireGuard, SSH forward, YARP-fronted reverse proxy) is
+  a separate concern that consumes Janus's decisions.
+- **An identity provider, MDM, or compliance platform.** Janus consumes Entra
+  ID and Intune. It does not replace them.
+- **A SIEM.** Janus produces the audit records that a SIEM ingests.
+- **A general-purpose ZTNA product.** Use Cloudflare Access or Entra Private
+  Access for SaaS and web app access. Use Janus where the protected resource
+  speaks Modbus, EtherNet/IP, or OPC-UA.
+- **A firewall replacement.** Janus sits behind your existing network
+  segmentation as an identity-aware admission layer, not in place of it.
+
+---
+
+## Why this doesn't exist yet
+
+Enterprise ZTNA products (Zscaler, Cloudflare Access, Entra Private Access,
+Tailscale Enterprise) are priced and architected for organizations that have
+already converged on web and SaaS protocols. They assume the protected
+resources speak HTTP, RDP, or SSH. OT gear does not — it speaks Modbus TCP,
+EtherNet/IP, OPC-UA, and a long tail of vendor-specific protocols designed
+twenty years before Zero Trust was a phrase.
+
+The gap Janus fills:
+
+- **Small enough to deploy at a 30-person machine shop**, both in dollars and
+  in operational complexity. No mesh overlay, no per-seat enterprise contract,
+  no agent on every OT device.
+- **Identity-grounded, not network-grounded.** Most existing OT-side controls
+  are still ACLs, VLAN tags, and jump hosts. Janus puts a UPN and a compliance
+  state in the decision path of every session.
+- **Built around CMMC 2.0 evidence requirements.** The audit log is the output,
+  not an afterthought. Every gate, including denials, produces a structured
+  record an assessor can read.
+- **Protocol-agnostic at the transport layer.** The decision engine doesn't
+  care whether the tunnel is TCP, IP, or application-layer; it emits a session
+  ID that a transport plug-in keys off.
+
+This is a small, opinionated piece of infrastructure that belongs in the gap
+between "we already have firewalls" and "we can afford an enterprise ZTNA
+license."
+
+---
+
 ## Who this is for
 
-This PoC is aimed at **smaller machine shops** that need to bring legacy operational
-infrastructure into a Zero Trust posture in order to meet **CMMC 2.0** requirements
-without ripping out the OT equipment they already own.
+Janus has two audiences:
+
+- **Operationally**, it is aimed at **smaller machine shops** that need to bring
+  legacy OT infrastructure into a Zero Trust posture to meet **CMMC 2.0**
+  requirements without ripping out the OT equipment they already own.
+- **Technically**, it is aimed at **backend, platform, and security engineers**
+  who can take the PowerShell PoC's behavior contract and build the production
+  service in a language that fits long-running infrastructure. The PoC is a
+  reference specification, not a finished product. See
+  [`CONTRIBUTING.md`](CONTRIBUTING.md) for where to plug in.
 
 The compliance story this design supports:
 
@@ -53,6 +114,13 @@ exactly where it is.
 ## Architecture
 
 ![Zero Trust OT Gateway — Architecture and Admission](architecture.png)
+
+Architecturally, Janus is a **stateless decision service**: every request is evaluated
+independently against the live state of the device registry, Entra ID, and Intune,
+and nothing about a previous decision shapes the next one. State that must live
+somewhere — the device registry, the audit log, an active session table for tunnel
+correlation — sits *outside* the decision engine, so the engine itself can scale
+horizontally and fail without losing context.
 
 ### How a request flows
 
@@ -81,7 +149,7 @@ admit entry already on disk.
 
 ---
 
-## Why this PoC exists
+## What the PoC pins down
 
 OT networks have historically been protected by air gaps and network segmentation alone.
 That model is breaking down: vendors need remote support, technicians use mobile thin
@@ -89,39 +157,75 @@ clients, and IT/OT convergence means IT-side identity now matters on the plant f
 and CMMC 2.0 expects controls that segmentation alone cannot demonstrate.
 
 A Zero Trust gateway flips the question from *"is this packet on the right VLAN?"* to
-*"who is this human, what device are they on, and is that device healthy?"* — and it does
-that check on **every** session, against the live state in Entra ID and Intune, not against
-a static ACL.
+*"who is this human, what device are they on, and is that device healthy?"* — and it
+does that check on **every** session, against the live state in Entra ID and Intune,
+not against a static ACL.
 
-This PowerShell PoC exists to:
+The PowerShell code in this repo is the **reference specification for Janus's
+behavior**. It is not a demo to be discarded once a "real" version is written — it is
+the canonical definition of what an admission decision looks like, what data flows
+through the system, and what gets written to the audit log. A production port to
+another language is a translation of this behavior, not a redesign of it.
 
-- **Prove the admission logic** end to end against real Microsoft Graph endpoints
-  (`Get-MgUserMemberOf`, `Get-MgDeviceManagementManagedDevice`) before committing to a
-  production implementation language.
-- **Pin down the data contracts** — the device registry shape, the admit/deny result
-  shape, the audit entry shape — so a port to another language is a translation, not a
-  redesign.
-- **Demonstrate the functional-core / imperative-shell split** that the production
-  version should preserve: pure decision logic that is trivially testable, surrounded by
-  a thin shell that does the I/O.
-- Give stakeholders something runnable to poke at while the production language and
-  deployment story are still being decided.
+The PoC pins down four things that production ports must preserve:
 
-The PoC is **not** a production gateway. It does not actually open a network tunnel — the
-admit path stops at issuing a session ID and writing the audit entry. The transport layer
-(TCP proxy, WireGuard, SSH forward, etc.) is the obvious next thing a software engineer
-extending this would wire up; the comment in `Request-OtAccess.ps1` marks the exact spot.
+- **The decision contract.** Input: `(upn, deviceId)`. Output: an admit/deny result
+  with reason, session ID, expiry, and resolved device metadata.
+- **The data contracts.** OT device registry schema, admit/deny result shape, and
+  audit entry shape are all defined here.
+- **The gate sequence.** Three gates in a fixed order, with cheap fail-fast checks
+  before expensive ones. Gate 1 is registry-only (no Graph call); Gates 2 and 3 are
+  Graph-backed. New gates slot into this sequence — see "Extensibility" below.
+- **The functional-core / imperative-shell split.** Pure decision logic that is
+  trivially testable, surrounded by a thin shell that does the I/O. This is the
+  property that makes the audit trail trivial to reason about during a CMMC
+  assessment.
+
+What the PoC is *not*: a production gateway. It does not actually open a network
+tunnel — the admit path stops at issuing a session ID and writing the audit entry.
+The transport layer (TCP proxy, WireGuard, SSH forward, etc.) is the obvious next
+thing a software engineer extending this would wire up; the comment in
+`Request-OtAccess.ps1` marks the exact spot.
 
 ---
 
 ## Repository contents
 
-| File | Purpose |
-|---|---|
-| `Request-OtAccess.ps1`       | The admission engine. Functional core (`Find-OtDevice`, `Test-GroupMembership`, `Test-IntuneCompliance`, `New-AdmitResult`, `New-DenyResult`, `New-AuditEntry`) plus the imperative shell (`Get-DeviceRegistry`, `Write-AuditLog`, `New-GraphClient`, `Request-OtAccess`). |
-| `Request-OtAccess.Tests.ps1` | Pester tests covering every pure function in the core. No Graph calls, no I/O. |
-| `devices.json`               | The device registry: deviceId, displayName, requiredGroup, location, protocol, ipAddress. |
-| `audit.log` *(generated)*    | Append-only JSON Lines audit log. One line per admission decision. |
+The codebase is deliberately split into two layers. The **functional core** is the
+**portable decision engine** — a production port reproduces it function-for-function.
+The **imperative shell** is **replaceable I/O** — a production port swaps it for
+whatever the target language and runtime prefer.
+
+### Functional core (portable decision engine)
+
+Pure functions, no I/O, no Graph calls. These define the decision logic and are the
+canonical specification a production port must reproduce:
+
+- `Find-OtDevice` — registry lookup
+- `Test-GroupMembership` — Entra group check against the device's required group
+- `Test-IntuneCompliance` — at-least-one-compliant-managed-device check
+- `New-AdmitResult`, `New-DenyResult` — decision constructors
+- `New-AuditEntry` — audit record constructor
+
+All live in `Request-OtAccess.ps1` and have full Pester coverage in
+`Request-OtAccess.Tests.ps1`. Tests run offline with no Graph tenant required —
+that is the property the production port must preserve.
+
+### Imperative shell (replaceable I/O)
+
+Functions that touch the world. A production port replaces each of these with
+something appropriate for the target stack:
+
+- `Get-DeviceRegistry` → registry-of-record (database, CMDB integration, etc.)
+- `New-GraphClient` and Graph calls → `Microsoft.Graph` SDK in .NET, `msgraph-sdk-go` in Go, etc.
+- `Write-AuditLog` → SIEM forwarder, signed append-only store, structured-log sink
+
+### Reference data files
+
+- `devices.json` — canonical OT device registry schema (deviceId, displayName,
+  requiredGroup, location, protocol, ipAddress).
+- `audit.log` *(generated)* — canonical admission decision output. The entry shape
+  is part of the spec.
 
 ### Running the PoC
 
@@ -143,20 +247,75 @@ Tests are pure-function only — they run offline and require no Graph tenant.
 
 ---
 
-## Production target language
+## Building an MVP
 
-PowerShell got us here because it has the most ergonomic Microsoft Graph SDK and lets us
-stand up the whole admission flow in a single file. It is the wrong language to actually
-**deploy** as a long-running gateway service: it has no first-class HTTP server story,
-weak concurrency primitives, and a startup cost that hurts on every cold path.
+A minimum viable Janus port is:
 
-The candidates below are roughly ordered by how strong a fit they are for this specific
-workload — a stateful, long-running, identity-aware network gateway that lives on a Linux
-host (likely in a container) and talks to Microsoft Graph constantly.
+- [ ] **HTTP API.** `POST /admit` accepting `{ upn, deviceId }`, returning the
+  admit/deny result schema. JSON in, JSON out.
+- [ ] **Admission engine.** Port the functional core verbatim. Same function
+  signatures, same return shapes, same audit-entry format. The Pester tests in
+  `Request-OtAccess.Tests.ps1` are the conformance suite — pass an equivalent
+  set in your target language.
+- [ ] **Graph integration.** Production-grade auth: workload identity,
+  certificate-based service principal, or managed identity — not interactive
+  `Connect-MgGraph`. Token caching with expiry-aware refresh.
+- [ ] **Device registry.** Persistent backing store. The PoC's flat JSON file is
+  fine for v0; database or CMDB integration is v1.
+- [ ] **Audit logging.** Append-only sink writing the canonical entry shape.
+  Local file is fine for v0; SIEM forwarding is v1.
+- [ ] **Session tracking.** Issue session IDs, store them with their expiry,
+  expose `GET /session/{id}` for lookup and `DELETE /session/{id}` for early
+  revocation.
+- [ ] **Health and observability.** `/healthz`, structured logs, basic metrics
+  (admit/deny rate, Graph latency, error rate).
+- [ ] **Optional: transport plug-in.** When ready, wire up a tunnel substrate
+  (YARP for HTTP-fronted access, WireGuard for L3, raw TCP proxy for everything
+  else) keyed off the issued session ID. Out of scope for the decision-engine MVP.
 
-### .NET languages (preferred)
+Anything beyond this is post-MVP.
 
-#### C# — primary candidate
+---
+
+## Extensibility: adding a gate
+
+Gates are composable by design. A new gate is three things:
+
+1. **A pure function** that takes the request context and returns either
+   `Allowed` or `Denied(reason)`. No I/O. Fully testable in isolation.
+2. **A signal source** in the imperative shell that gathers whatever data the
+   pure function needs — a Graph call, a database lookup, an external service
+   hit, a clock read.
+3. **A sequencing decision** in the engine. Cheap fail-fast checks run first
+   (registry lookup is free; Graph calls are not). Place new gates accordingly.
+
+Existing gates (`Find-OtDevice`, `Test-GroupMembership`, `Test-IntuneCompliance`)
+all conform to this contract. A risk-score gate, a maintenance-window gate, a
+per-device PIN-prompt gate, or a time-of-day gate would all slot in the same
+way: pure decision function plus a shell-side data fetcher.
+
+Two rules every gate must follow:
+
+- **Deterministic.** Same inputs, same outputs, every time. A gate is *not* the
+  place to add jitter, retries, or stochastic logic; those belong in the shell.
+- **Auditable.** The deny reason must be a stable, human-readable string that
+  can land verbatim in the audit log. An assessor reading the log should
+  understand the deny without having to read code.
+
+---
+
+## Implementation direction
+
+Janus is a **long-running service, not a script.** The runtime needs to handle
+sustained admission load, maintain a Graph token cache, write to the audit sink
+without blocking the decision path, and stay up for weeks. PowerShell is the
+wrong shape for that — no first-class HTTP server, weak concurrency primitives,
+and startup cost on every cold path. The recommendation below is **guidance for
+whoever ports Janus**, not a neutral comparison of options.
+
+### .NET languages (recommended)
+
+#### C# — primary recommendation
 - **Microsoft Graph SDK is first-class.** `Microsoft.Graph` and `Microsoft.Graph.Beta`
   are authored by the same team that owns the API; new endpoints land here first. Auth
   via `Azure.Identity` integrates cleanly with managed identity, workload identity, and
@@ -173,7 +332,7 @@ host (likely in a container) and talks to Microsoft Graph constantly.
 - **Trade-off:** the functional-core split we have in the PoC has to be enforced by
   discipline; C# does not push you toward immutability the way F# does.
 
-#### F# — strong fit for the core, especially if we keep the split
+#### F# — recommended for the admission core if a maintainer can own it
 - **The functional-core / imperative-shell architecture is F#'s native idiom.** The pure
   decision functions (`Find-OtDevice`, `Test-GroupMembership`, `Test-IntuneCompliance`,
   result/audit constructors) translate almost line-for-line into F# with discriminated
@@ -188,7 +347,7 @@ host (likely in a container) and talks to Microsoft Graph constantly.
 - **Trade-off:** smaller hiring pool. If the team maintaining this won't have an F#
   speaker on it long-term, that is a real operational risk.
 
-### Non-.NET candidates (lower priority, listed for completeness)
+### Non-.NET candidates (not recommended for the primary path)
 
 #### Go
 - Static single binary, tiny container image, predictable runtime — attractive for a
